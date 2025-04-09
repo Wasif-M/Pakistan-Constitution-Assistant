@@ -31,7 +31,7 @@ os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
 
 # Get API keys from Streamlit secrets for secure deployment
 # Make sure to set these in your Streamlit secrets.toml or environment variables
-groq_api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+groq_api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", "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"))
 os.environ["GROQ_API_KEY"] = groq_api_key
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 

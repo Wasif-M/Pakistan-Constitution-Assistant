@@ -1,5 +1,13 @@
 import os
 import streamlit as st
+
+# === SQLite Fix for ChromaDB on Streamlit Cloud ===
+# This needs to be done before any ChromaDB or Langchain imports
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+# =====================================================
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_chroma import Chroma
@@ -10,7 +18,7 @@ from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# Page configuration
+
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
     page_icon="🇵🇰",
@@ -31,8 +39,6 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 if not groq_api_key:
     st.warning("⚠️ GROQ API Key not found. Please set it in your secrets or environment variables.")
 
-
-# CSS styling with fixed footer
 st.markdown("""
 <style>
     .main-header {
@@ -76,15 +82,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Header
+
 st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
-# Initialize chat history
+
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# Sidebar
+
 with st.sidebar:
     st.markdown("<h2 class='sub-header'>About</h2>", unsafe_allow_html=True)
     st.markdown("""
@@ -104,7 +110,7 @@ with st.sidebar:
         st.session_state.history = []
         st.rerun()
 
-# Vector store initialization
+
 @st.cache_resource
 def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
@@ -127,7 +133,6 @@ def build_or_load_vector_store():
                 )
         else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # Use a data folder in the app directory
                 docs = PyPDFLoader("data/constitution_of_pakistan.pdf").load()
                 
                 def clean_text(text):
@@ -141,14 +146,14 @@ def build_or_load_vector_store():
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                # Create Chroma DB with persist_directory specified
+                
                 Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
                     persist_directory=PERSIST_DIRECTORY
                 )
                 
-                # Return a new instance of the persisted vector store
+                
                 return Chroma(
                     persist_directory=PERSIST_DIRECTORY,
                     embedding_function=embedding_model
@@ -168,7 +173,7 @@ except Exception as e:
     st.error(f"Error initializing vector database: {str(e)}")
     db_initialized = False
 
-# Response generation
+
 def generate_response(question):
     # Handle potential API key issues gracefully
     if not groq_api_key:
@@ -239,11 +244,10 @@ def generate_response(question):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
-# Main chat interface
+
 chat_container = st.container()
 
 with chat_container:
-    # Display chat history
     for message in st.session_state.history:
         if message["role"] == "user":
             st.chat_message("user").write(message["content"])
@@ -253,7 +257,7 @@ with chat_container:
                 unsafe_allow_html=True
             )
 
-# Ensure input appears at the bottom of chat
+
 if db_initialized:
     user_question = st.chat_input("Ask a question about the Constitution of Pakistan...")
 
@@ -270,12 +274,12 @@ if db_initialized:
 else:
     st.warning("Vector database not initialized. Please check the error message above.")
 
-# Fixed footer
+
 # Add deployment information 
 st.markdown("""
 <div class='footer'>
     © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only | 
-    <a href="https://github.com/your-username/pakistan-constitution-assistant" target="_blank">GitHub</a>
+    <a href="https://github.com/Wasif-M/Pakistan-Constitution-Assistant" target="_blank">GitHub</a>
 </div>
 """, unsafe_allow_html=True)
 

@@ -10,19 +10,29 @@ from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-
+# Page configuration
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
     page_icon="🇵🇰",
     layout="wide"
 )
 
-PERSIST_DIRECTORY = r"C:\Users\WasifMehmood\Desktop\Agent\Pk-Constitution-Assistant\Data\pakistan_constitution_db"
+# Use relative paths for deployment
+PERSIST_DIRECTORY = "pakistan_constitution_db"
 os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
 
-os.environ["GROQ_API_KEY"] = "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"
+# Get API keys from Streamlit secrets for secure deployment
+# Make sure to set these in your Streamlit secrets.toml or environment variables
+groq_api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+os.environ["GROQ_API_KEY"] = groq_api_key
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
+# Show warning if API key not configured
+if not groq_api_key:
+    st.warning("⚠️ GROQ API Key not found. Please set it in your secrets or environment variables.")
+
+
+# CSS styling with fixed footer
 st.markdown("""
 <style>
     .main-header {
@@ -66,15 +76,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
+# Header
 st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
-
+# Initialize chat history
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-
+# Sidebar
 with st.sidebar:
     st.markdown("<h2 class='sub-header'>About</h2>", unsafe_allow_html=True)
     st.markdown("""
@@ -94,11 +104,16 @@ with st.sidebar:
         st.session_state.history = []
         st.rerun()
 
-
+# Vector store initialization
 @st.cache_resource
 def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
+        # Check if we have the PDF file
+        if not os.path.exists("data/constitution_of_pakistan.pdf"):
+            st.error("Constitution PDF file not found. Make sure to place it in the 'data' folder.")
+            return None
+            
         from langchain_community.embeddings import FastEmbedEmbeddings
         embedding_model = FastEmbedEmbeddings()
 
@@ -112,7 +127,8 @@ def build_or_load_vector_store():
                 )
         else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                docs = PyPDFLoader(r"C:\Users\WasifMehmood\Desktop\Agent\Pk-Constitution-Assistant\Data\constitution_of_pakistan.pdf").load()
+                # Use a data folder in the app directory
+                docs = PyPDFLoader("data/constitution_of_pakistan.pdf").load()
                 
                 def clean_text(text):
                     return " ".join(text.split())
@@ -125,14 +141,14 @@ def build_or_load_vector_store():
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                
+                # Create Chroma DB with persist_directory specified
                 Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
                     persist_directory=PERSIST_DIRECTORY
                 )
                 
-                
+                # Return a new instance of the persisted vector store
                 return Chroma(
                     persist_directory=PERSIST_DIRECTORY,
                     embedding_function=embedding_model
@@ -152,8 +168,12 @@ except Exception as e:
     st.error(f"Error initializing vector database: {str(e)}")
     db_initialized = False
 
-
+# Response generation
 def generate_response(question):
+    # Handle potential API key issues gracefully
+    if not groq_api_key:
+        return "API key not configured. Please set up your GROQ API key in the Streamlit secrets."
+    
     llm = ChatGroq(
         model="llama3-70b-8192",
         temperature=0.1,
@@ -219,10 +239,11 @@ def generate_response(question):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
-
+# Main chat interface
 chat_container = st.container()
 
 with chat_container:
+    # Display chat history
     for message in st.session_state.history:
         if message["role"] == "user":
             st.chat_message("user").write(message["content"])
@@ -232,7 +253,7 @@ with chat_container:
                 unsafe_allow_html=True
             )
 
-
+# Ensure input appears at the bottom of chat
 if db_initialized:
     user_question = st.chat_input("Ask a question about the Constitution of Pakistan...")
 
@@ -249,9 +270,26 @@ if db_initialized:
 else:
     st.warning("Vector database not initialized. Please check the error message above.")
 
-
+# Fixed footer
+# Add deployment information 
 st.markdown("""
 <div class='footer'>
-    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
+    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only | 
+    <a href="https://github.com/your-username/pakistan-constitution-assistant" target="_blank">GitHub</a>
 </div>
 """, unsafe_allow_html=True)
+
+# Add requirements.txt check
+if not os.path.exists("requirements.txt"):
+    st.sidebar.warning("""
+    ⚠️ For deployment, make sure to create a requirements.txt file with these packages:
+    ```
+    streamlit
+    langchain
+    langchain-text-splitters
+    langchain-community
+    langchain-chroma
+    langchain-groq
+    fastembed
+    ```
+    """)

@@ -116,16 +116,16 @@ def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
         # Check if we have the PDF file
-        pdf_path = os.path.join("data", "constitution_of_pakistan.pdf")
-        if not os.path.exists(pdf_path):
-            st.error(f"Constitution PDF file not found at {pdf_path}. Make sure to place it in the 'data' folder.")
+        if not os.path.exists("data/constitution_of_pakistan.pdf"):
+            st.error("Constitution PDF file not found. Make sure to place it in the 'data' folder.")
             return None
             
         from langchain_community.embeddings import FastEmbedEmbeddings
         embedding_model = FastEmbedEmbeddings()
 
-        # Check if the vector store already exists
-        if os.path.exists(PERSIST_DIRECTORY) and os.listdir(PERSIST_DIRECTORY):
+        db_file = os.path.join(PERSIST_DIRECTORY, "chroma.sqlite3")
+        
+        if os.path.exists(pakistan_constitution_db):
             with st.spinner("Loading existing vector database..."):
                 return Chroma(
                     persist_directory=PERSIST_DIRECTORY,
@@ -133,8 +133,7 @@ def build_or_load_vector_store():
                 )
         else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # Load and process the PDF
-                docs = PyPDFLoader(pdf_path).load()
+                docs = PyPDFLoader("data/constitution_of_pakistan.pdf").load()
                 
                 def clean_text(text):
                     return " ".join(text.split())
@@ -147,14 +146,18 @@ def build_or_load_vector_store():
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                # Create and persist the vector store
-                vectordb = Chroma.from_documents(
+                
+                Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
                     persist_directory=PERSIST_DIRECTORY
                 )
                 
-                return vectordb
+                
+                return Chroma(
+                    persist_directory=PERSIST_DIRECTORY,
+                    embedding_function=embedding_model
+                )
 
     except ImportError:
         st.error("FastEmbed not available. Please install with: pip install fastembed")
@@ -162,9 +165,6 @@ def build_or_load_vector_store():
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         raise
-
-                
-           
 
 try:
     chroma_db = build_or_load_vector_store()

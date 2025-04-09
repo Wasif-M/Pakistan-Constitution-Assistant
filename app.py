@@ -110,55 +110,22 @@ with st.sidebar:
         st.session_state.history = []
         st.rerun()
 
-    # Debug information - uncomment to help troubleshoot
-    if st.checkbox("Show Debug Info"):
-        st.write("Current working directory:", os.getcwd())
-        st.write("Files in root directory:", os.listdir())
-        st.write("Files in data directory:", 
-                 os.listdir("data") if os.path.exists("data") else "No data folder")
-
-
-def find_pdf_file():
-    """Find the constitution PDF file in various possible locations."""
-    possible_paths = [
-        "data/constitution_of_pakistan.pdf",
-        "constitution_of_pakistan.pdf",
-        "data/pakistan_constitution.pdf",
-        "pakistan_constitution.pdf",
-        # Add more potential paths as needed
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            st.sidebar.success(f"Found constitution file at: {path}")
-            return path
-    
-    return None
-
-
-# File uploader for constitution PDF
-def handle_pdf_upload():
-    uploaded_file = st.sidebar.file_uploader("Upload Constitution PDF", type="pdf")
-    if uploaded_file is not None:
-        # Save the uploaded file
-        os.makedirs("data", exist_ok=True)
-        with open("data/constitution_of_pakistan.pdf", "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.sidebar.success("File uploaded successfully!")
-        return "data/constitution_of_pakistan.pdf"
-    return None
-
 
 @st.cache_resource
-def build_or_load_vector_store(pdf_path):
+def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
+        # Check if we have the PDF file
+        if not os.path.exists("data/constitution_of_pakistan.pdf"):
+            st.error("Constitution PDF file not found. Make sure to place it in the 'data' folder.")
+            return None
+            
         from langchain_community.embeddings import FastEmbedEmbeddings
         embedding_model = FastEmbedEmbeddings()
 
         db_file = os.path.join(PERSIST_DIRECTORY, "chroma.sqlite3")
         
-        if os.path.exists(db_file):
+        if os.path.exists(pakistan_constitution_db):
             with st.spinner("Loading existing vector database..."):
                 return Chroma(
                     persist_directory=PERSIST_DIRECTORY,
@@ -166,7 +133,7 @@ def build_or_load_vector_store(pdf_path):
                 )
         else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                docs = PyPDFLoader(pdf_path).load()
+                docs = PyPDFLoader("data/constitution_of_pakistan.pdf").load()
                 
                 def clean_text(text):
                     return " ".join(text.split())
@@ -199,18 +166,9 @@ def build_or_load_vector_store(pdf_path):
         st.error(f"Error initializing vector store: {str(e)}")
         raise
 
-
-# Find or upload PDF file
-pdf_path = find_pdf_file() or handle_pdf_upload()
-
-# Initialize vector store
 try:
-    if pdf_path:
-        chroma_db = build_or_load_vector_store(pdf_path)
-        db_initialized = True
-    else:
-        st.error("Constitution PDF file not found. Please upload it using the form in the sidebar.")
-        db_initialized = False
+    chroma_db = build_or_load_vector_store()
+    db_initialized = True
 except Exception as e:
     st.error(f"Error initializing vector database: {str(e)}")
     db_initialized = False
@@ -317,10 +275,25 @@ else:
     st.warning("Vector database not initialized. Please check the error message above.")
 
 
-
+# Add deployment information 
 st.markdown("""
 <div class='footer'>
     © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only | 
     <a href="https://github.com/Wasif-M/Pakistan-Constitution-Assistant" target="_blank">GitHub</a>
 </div>
 """, unsafe_allow_html=True)
+
+# Add requirements.txt check
+if not os.path.exists("requirements.txt"):
+    st.sidebar.warning("""
+    ⚠️ For deployment, make sure to create a requirements.txt file with these packages:
+    ```
+    streamlit
+    langchain
+    langchain-text-splitters
+    langchain-community
+    langchain-chroma
+    langchain-groq
+    fastembed
+    ```
+    """)

@@ -125,7 +125,7 @@ def build_or_load_vector_store():
 
         db_file = os.path.join(PERSIST_DIRECTORY, "chroma.sqlite3")
         
-        if os.path.exists(db_file):
+        if os.path.exists(pakistan_constitution_db):
             with st.spinner("Loading existing vector database..."):
                 return Chroma(
                     persist_directory=PERSIST_DIRECTORY,

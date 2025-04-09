@@ -133,7 +133,7 @@ def build_or_load_vector_store():
                 )
         else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                docs = PyPDFLoader("data/constitution_of_pakistan.pdf").load()
+                docs = PyPDFLoader("Data/constitution_of_pakistan.pdf").load()
                 
                 def clean_text(text):
                     return " ".join(text.split())

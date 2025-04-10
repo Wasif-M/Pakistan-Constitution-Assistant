@@ -1,8 +1,10 @@
 import os
+import chromadb
+from chromadb.config import Settings
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_chroma import Chroma
+#from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
@@ -107,61 +109,58 @@ with st.sidebar:
 def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
-        # Using a reliable model for Streamlit deployment
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        
+        # Check if the database exists
         db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
-        # If database doesn't exist yet
         if not os.path.exists(db_file):
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # Use the fixed PDF path
                 pdf_path = "data/constitution_of_pakistan.pdf"
                 if not os.path.exists(pdf_path):
                     st.error(f"PDF file not found at path: {pdf_path}")
-                    st.info("Please ensure the Constitution PDF is in the data directory.")
                     return None
                 
-                # Load the document
+                # Load and process the document
                 docs = PyPDFLoader(pdf_path).load()
                 
-                # Clean the text
                 def clean_text(text):
                     return " ".join(text.split())
                 
                 cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
                 
-                # Split the documents
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=2000,
                     chunk_overlap=200
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                # Create the database
-                Chroma.from_documents(
+                # Create the database with explicit settings
+                db = Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
-                    persist_directory=DATA_DIR
-                )
-                
-                # No temporary files to delete since we're using a fixed path
-                
-                return Chroma(
                     persist_directory=DATA_DIR,
-                    embedding_function=embedding_model
+                    client_settings=chromadb.config.Settings(
+                        chroma_db_impl="duckdb+parquet",
+                        persist_directory=DATA_DIR,
+                        anonymized_telemetry=False
+                    )
                 )
-                
+                db.persist()
+                return db
         else:
-            # Load the existing database
+            # Load existing database
             with st.spinner("Loading existing vector database..."):
                 return Chroma(
                     persist_directory=DATA_DIR,
-                    embedding_function=embedding_model
+                    embedding_function=embedding_model,
+                    client_settings=chromadb.config.Settings(
+                        chroma_db_impl="duckdb+parquet",
+                        persist_directory=DATA_DIR,
+                        anonymized_telemetry=False
+                    )
                 )
 
-    except ImportError:
-        st.error("Required embedding models not available. Please check your installation.")
-        return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None

@@ -3,7 +3,7 @@ import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_chroma import Chroma
-from langchain_community.embeddings import FastEmbedEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
@@ -13,7 +13,7 @@ import tempfile
 
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
-    page_icon="🇵🇰",
+    page_icon="🇵🇰",  # Using Pakistan flag emoji
     layout="wide"
 )
 
@@ -70,10 +70,14 @@ st.markdown("""
     .chat-container {
         margin-bottom: 70px;  /* Ensure content doesn't hide behind footer */
     }
+    /* Ensure emoji displays properly across browsers */
+    .emoji-fix {
+        font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Android Emoji", sans-serif;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-header'><span class='emoji-fix'>🇵🇰</span> Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
 if 'history' not in st.session_state:
@@ -94,36 +98,31 @@ with st.sidebar:
     **Data Source:** Official Constitution of Pakistan (2024 Edition)
     """)
     
-    uploaded_pdf = st.file_uploader("Upload Constitution PDF", type="pdf")
-    
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
+        
+    st.markdown("""
+    **Note:** This application uses a pre-loaded Constitution of Pakistan PDF located in the data directory.
+    """)
 
 @st.cache_resource
-def build_or_load_vector_store(pdf_file=None):
-    """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
+def build_or_load_vector_store():
+    """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
-        embedding_model = FastEmbedEmbeddings()
+        # Using a reliable model for Streamlit deployment
+        embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
-        # If we have a PDF file uploaded or the database doesn't exist yet
-        if pdf_file is not None or not os.path.exists(db_file):
+        # If database doesn't exist yet
+        if not os.path.exists(db_file):
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # If a file was uploaded, use it
-                if pdf_file is not None:
-                    # Save the uploaded file temporarily
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                        tmp_file.write(pdf_file.getvalue())
-                        pdf_path = tmp_file.name
-                else:
-                    # Use the default file path - first we need to check if the file exists
-                    default_pdf_path = "constitution_of_pakistan.pdf"
-                    if not os.path.exists(default_pdf_path):
-                        st.error(f"Default PDF file not found: {default_pdf_path}")
-                        st.info("Please upload a PDF of the Pakistan Constitution.")
-                        return None
-                    pdf_path = default_pdf_path
+                # Use the fixed PDF path
+                pdf_path = "data/constitution_of_pakistan.pdf"
+                if not os.path.exists(pdf_path):
+                    st.error(f"PDF file not found at path: {pdf_path}")
+                    st.info("Please ensure the Constitution PDF is in the data directory.")
+                    return None
                 
                 # Load the document
                 docs = PyPDFLoader(pdf_path).load()
@@ -148,12 +147,7 @@ def build_or_load_vector_store(pdf_file=None):
                     persist_directory=DATA_DIR
                 )
                 
-                # Delete the temporary file if it was created
-                if pdf_file is not None:
-                    try:
-                        os.unlink(pdf_path)
-                    except:
-                        pass
+                # No temporary files to delete since we're using a fixed path
                 
                 return Chroma(
                     persist_directory=DATA_DIR,
@@ -169,14 +163,14 @@ def build_or_load_vector_store(pdf_file=None):
                 )
 
     except ImportError:
-        st.error("FastEmbed not available. Please install with: pip install fastembed")
+        st.error("Required embedding models not available. Please check your installation.")
         return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store based on the uploaded file or existing database
-chroma_db = build_or_load_vector_store(uploaded_pdf if 'uploaded_pdf' in locals() else None)
+# Initialize the vector store using the fixed PDF path
+chroma_db = build_or_load_vector_store()
 db_initialized = chroma_db is not None
 
 def generate_response(question):
@@ -274,8 +268,7 @@ if db_initialized:
 
         st.session_state.history.append({"role": "assistant", "content": response})
 else:
-    if 'uploaded_pdf' not in locals() or uploaded_pdf is None:
-        st.warning("Please upload the Constitution of Pakistan PDF to initialize the application.")
+    st.warning("Vector database not initialized. Please check that the Constitution PDF exists at 'data/constitution_of_pakistan.pdf'.")
 
 st.markdown("""
 <div class='footer'>

@@ -1,4 +1,3 @@
-
 import os
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -121,7 +120,8 @@ def build_or_load_vector_store():
             with st.spinner("Loading existing vector database..."):
                 vector_store = FAISS.load_local(
                     folder_path=INDEX_PATH,
-                    embeddings=embedding_model
+                    embeddings=embedding_model,
+                    allow_dangerous_deserialization=True  # Added this parameter
                 )
                 return vector_store
         

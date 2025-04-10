@@ -268,6 +268,6 @@ else:
 
 st.markdown("""
 <div class='footer'>
-    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
+     2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
 </div>
 """, unsafe_allow_html=True)

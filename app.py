@@ -1,4 +1,5 @@
 import os
+os.environ["CHROMA_DB_IMPL"] = "duckdb"
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader

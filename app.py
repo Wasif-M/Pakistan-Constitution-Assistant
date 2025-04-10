@@ -13,7 +13,7 @@ import tempfile
 
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
-    page_icon="🇵🇰",
+    page_icon="🇵🇰",  # Using Pakistan flag emoji
     layout="wide"
 )
 
@@ -70,10 +70,14 @@ st.markdown("""
     .chat-container {
         margin-bottom: 70px;  /* Ensure content doesn't hide behind footer */
     }
+    /* Ensure emoji displays properly across browsers */
+    .emoji-fix {
+        font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Android Emoji", sans-serif;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-header'><span class='emoji-fix'>🇵🇰</span> Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
 if 'history' not in st.session_state:
@@ -268,6 +272,6 @@ else:
 
 st.markdown("""
 <div class='footer'>
-     2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
+    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
 </div>
 """, unsafe_allow_html=True)

@@ -9,27 +9,22 @@ from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-import tempfile
 
+# Streamlit page config
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
-    page_icon="🇵🇰",  # Using Pakistan flag emoji
+    page_icon="🇵🇰",
     layout="wide"
 )
 
-# Create a data directory that works in Streamlit Cloud
-DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
+# Cloud-friendly paths
+DATA_DIR = "./data"
+PERSIST_DIRECTORY = f"{DATA_DIR}/pakistan_constitution_db"
+PDF_PATH = f"{DATA_DIR}/constitution_of_pakistan.pdf"
 os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
 
-# Get API key from Streamlit secrets or environment variable
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
-if not GROQ_API_KEY:
-    st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
-
-# Set environment variables
-os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-
+# CSS styling
 st.markdown("""
 <style>
     .main-header {
@@ -48,7 +43,7 @@ st.markdown("""
         padding: 20px;
         border-radius: 10px;
         border-left: 5px solid #01411C;
-        margin-bottom: 60px;  /* Space for fixed footer */
+        margin-bottom: 60px;
     }
     .footer {
         position: fixed;
@@ -63,32 +58,22 @@ st.markdown("""
         border-top: 1px solid #f0f0f0;
         z-index: 100;
     }
-    .loading {
-        text-align: center;
-        color: #01411C;
-    }
-    .chat-container {
-        margin-bottom: 70px;  /* Ensure content doesn't hide behind footer */
-    }
-    /* Ensure emoji displays properly across browsers */
-    .emoji-fix {
-        font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Android Emoji", sans-serif;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1 class='main-header'><span class='emoji-fix'>🇵🇰</span> Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
+# App header
+st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
+# Initialize chat history
 if 'history' not in st.session_state:
     st.session_state.history = []
 
+# Sidebar
 with st.sidebar:
     st.markdown("<h2 class='sub-header'>About</h2>", unsafe_allow_html=True)
     st.markdown("""
     This application uses RAG (Retrieval Augmented Generation) to answer questions about the Constitution of Pakistan.
-    
-    It retrieves relevant sections from the constitution and generates expert legal responses based on the constitutional text.
     
     **How it works:**
     1. Enter your question about Pakistan's Constitution
@@ -101,86 +86,68 @@ with st.sidebar:
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
-        
-    st.markdown("""
-    **Note:** This application uses a pre-loaded Constitution of Pakistan PDF located in the data directory.
-    """)
 
+# Vector database setup
 @st.cache_resource
 def build_or_load_vector_store():
-    """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
-        # Using a reliable model for Streamlit deployment
-        embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
-        
-        # If database doesn't exist yet
-        if not os.path.exists(db_file):
+        from langchain_community.embeddings import FastEmbedEmbeddings
+        embedding_model = FastEmbedEmbeddings()
+
+        if os.path.exists(f"{PERSIST_DIRECTORY}/chroma.sqlite3"):
+            with st.spinner("Loading existing vector database..."):
+                return Chroma(
+                    persist_directory=PERSIST_DIRECTORY,
+                    embedding_function=embedding_model
+                )
+        else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # Use the fixed PDF path
-                pdf_path = "data/constitution_of_pakistan.pdf"
-                if not os.path.exists(pdf_path):
-                    st.error(f"PDF file not found at path: {pdf_path}")
-                    st.info("Please ensure the Constitution PDF is in the data directory.")
-                    return None
+                # Load and clean PDF
+                docs = PyPDFLoader(PDF_PATH).load()
                 
-                # Load the document
-                docs = PyPDFLoader(pdf_path).load()
-                
-                # Clean the text
                 def clean_text(text):
                     return " ".join(text.split())
                 
                 cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
                 
-                # Split the documents
+                # Split documents
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=2000,
                     chunk_overlap=200
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                # Create the database
+                # Create and persist vector store
                 Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
-                    persist_directory=DATA_DIR
+                    persist_directory=PERSIST_DIRECTORY
                 )
                 
-                # No temporary files to delete since we're using a fixed path
-                
                 return Chroma(
-                    persist_directory=DATA_DIR,
-                    embedding_function=embedding_model
-                )
-                
-        else:
-            # Load the existing database
-            with st.spinner("Loading existing vector database..."):
-                return Chroma(
-                    persist_directory=DATA_DIR,
+                    persist_directory=PERSIST_DIRECTORY,
                     embedding_function=embedding_model
                 )
 
-    except ImportError:
-        st.error("Required embedding models not available. Please check your installation.")
-        return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store using the fixed PDF path
-chroma_db = build_or_load_vector_store()
-db_initialized = chroma_db is not None
+# Initialize vector store
+try:
+    chroma_db = build_or_load_vector_store()
+    db_initialized = True
+except Exception as e:
+    st.error(f"Error initializing vector database: {str(e)}")
+    db_initialized = False
 
+# Response generation function
 def generate_response(question):
-    if not GROQ_API_KEY:
-        return "Error: GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable."
-        
     llm = ChatGroq(
         model="llama3-70b-8192",
         temperature=0.1,
-        max_tokens=4096
+        max_tokens=4096,
+        api_key=st.secrets["GROQ_API_KEY"]
     )
     
     template = """
@@ -200,10 +167,6 @@ def generate_response(question):
        - Clearly state the information gap
        - Identify the specific constitutional provisions that would be needed
        - Avoid speculative interpretation
-    6. Distinguish between:
-       - Explicit constitutional text (direct quotations)
-       - Constitutional mechanisms (procedural elements)
-       - Constitutional principles (underlying concepts)
     RESPONSE FORMAT:
     CONSTITUTIONAL ANALYSIS: [Concise summary of the relevant constitutional framework]
     DETAILED RESPONSE:
@@ -217,8 +180,8 @@ def generate_response(question):
     retriever = chroma_db.as_retriever(
         search_type="mmr", 
         search_kwargs={
-            "fetch_k": 15,  
-            "k": 7,  
+            "fetch_k": 15,
+            "k": 7,
             "lambda_mult": 0.7,
         }
     )
@@ -242,6 +205,7 @@ def generate_response(question):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
+# Chat interface
 chat_container = st.container()
 
 with chat_container:
@@ -254,6 +218,7 @@ with chat_container:
                 unsafe_allow_html=True
             )
 
+# User input and processing
 if db_initialized:
     user_question = st.chat_input("Ask a question about the Constitution of Pakistan...")
 
@@ -268,8 +233,9 @@ if db_initialized:
 
         st.session_state.history.append({"role": "assistant", "content": response})
 else:
-    st.warning("Vector database not initialized. Please check that the Constitution PDF exists at 'data/constitution_of_pakistan.pdf'.")
+    st.warning("Vector database not initialized. Please check the error message above.")
 
+# Footer
 st.markdown("""
 <div class='footer'>
     © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only

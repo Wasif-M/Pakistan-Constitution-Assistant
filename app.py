@@ -134,11 +134,15 @@ except Exception as e:
     db_initialized = False
 
 def generate_response(question):
+    GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+    if not GROQ_API_KEY:
+        return "Error: GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable."
+        
     llm = ChatGroq(
         model="llama3-70b-8192",
         temperature=0.1,
         max_tokens=4096,
-        api_key=st.secrets["GROQ_API_KEY"]
+        api_key=GROQ_API_KEY
     )
     
     template = """

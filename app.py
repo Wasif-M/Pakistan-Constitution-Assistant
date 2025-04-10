@@ -1,5 +1,4 @@
 import os
-os.environ["CHROMA_DB_IMPL"] = "duckdb"
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
@@ -22,10 +21,11 @@ st.set_page_config(
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Get API key from Streamlit secrets or environment variable
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+# Get API key from Streamlit secrets
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]  # Access the API key directly from the secrets file
+
 if not GROQ_API_KEY:
-    st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
+    st.error("GROQ API key is missing. Please set it in your Streamlit secrets.toml file.")
 
 # Set environment variables
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY

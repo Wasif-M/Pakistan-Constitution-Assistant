@@ -1,8 +1,9 @@
 import os
 import streamlit as st
+import pickle
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_chroma import Chroma
+from langchain.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
@@ -17,79 +18,24 @@ st.set_page_config(
     layout="wide"
 )
 
-PERSIST_DIRECTORY = r"C:\Users\WasifMehmood\Desktop\Agent\Pk-Constitution-Assistant\Data\pakistan_constitution_db"
+PERSIST_DIRECTORY = r"C:\Users\WasifMehmood\Desktop\Agent\Pk-Constitution-Assistant\Data\faiss_index"
 os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
+FAISS_INDEX_PATH = os.path.join(PERSIST_DIRECTORY, "faiss_index.pkl")
 
 os.environ["GROQ_API_KEY"] = "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"
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #01411C;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    .sub-header {
-        font-size: 1.5rem;
-        color: #01411C;
-        margin-bottom: 1rem;
-    }
-    .response-container {
-        background-color: #f8f9fa;
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #01411C;
-        margin-bottom: 60px;  /* Space for fixed footer */
-    }
-    .footer {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        text-align: center;
-        padding: 10px;
-        background-color: white;
-        color: gray;
-        font-size: 0.8rem;
-        border-top: 1px solid #f0f0f0;
-        z-index: 100;
-    }
-    .loading {
-        text-align: center;
-        color: #01411C;
-    }
-    .chat-container {
-        margin-bottom: 70px;  /* Ensure content doesn't hide behind footer */
-    }
-</style>
-""", unsafe_allow_html=True)
-
-
+# Styling
+st.markdown("""...""", unsafe_allow_html=True)  # Keep your original style block
 st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
-
 
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-
 with st.sidebar:
     st.markdown("<h2 class='sub-header'>About</h2>", unsafe_allow_html=True)
-    st.markdown("""
-    This application uses RAG (Retrieval Augmented Generation) to answer questions about the Constitution of Pakistan.
-    
-    It retrieves relevant sections from the constitution and generates expert legal responses based on the constitutional text.
-    
-    **How it works:**
-    1. Enter your question about Pakistan's Constitution
-    2. The system retrieves relevant constitutional provisions
-    3. An AI legal expert generates a structured analysis
-    
-    **Data Source:** Official Constitution of Pakistan (2024 Edition)
-    """)
-    
+    st.markdown("""...""")  # Keep your original About block
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
@@ -97,125 +43,75 @@ with st.sidebar:
 
 @st.cache_resource
 def build_or_load_vector_store():
-    """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
-        from langchain_community.embeddings import FastEmbedEmbeddings
-        embedding_model = FastEmbedEmbeddings()
+        embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-        db_file = os.path.join(PERSIST_DIRECTORY, "chroma.sqlite3")
-        
-        if os.path.exists(db_file):
-            with st.spinner("Loading existing vector database..."):
-                return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
-                    embedding_function=embedding_model
-                )
-        else:
-            with st.spinner("Building new vector database (this may take a few minutes)..."):
-                docs = PyPDFLoader(r"C:\Users\WasifMehmood\Desktop\Agent\Pk-Constitution-Assistant\Data\constitution_of_pakistan.pdf").load()
-                
-                def clean_text(text):
-                    return " ".join(text.split())
-                
-                cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
-                
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=2000,
-                    chunk_overlap=200
-                )
-                documents = text_splitter.split_documents(cleaned_docs)
-                
-                
-                Chroma.from_documents(
-                    documents=documents,
-                    embedding=embedding_model,
-                    persist_directory=PERSIST_DIRECTORY
-                )
-                
-                
-                return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
-                    embedding_function=embedding_model
-                )
+        if os.path.exists(FAISS_INDEX_PATH):
+            with st.spinner("Loading existing FAISS index..."):
+                with open(FAISS_INDEX_PATH, "rb") as f:
+                    return pickle.load(f)
 
-    except ImportError:
-        st.error("FastEmbed not available. Please install with: pip install fastembed")
-        raise
+        with st.spinner("Building FAISS index..."):
+            loader = PyPDFLoader(r"C:\Users\WasifMehmood\Desktop\Agent\Pk-Constitution-Assistant\Data\constitution_of_pakistan.pdf")
+            docs = loader.load()
+
+            def clean_text(text):
+                return " ".join(text.split())
+
+            cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
+
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+            documents = text_splitter.split_documents(cleaned_docs)
+
+            faiss_index = FAISS.from_documents(documents, embedding_model)
+
+            with open(FAISS_INDEX_PATH, "wb") as f:
+                pickle.dump(faiss_index, f)
+
+            return faiss_index
+
     except Exception as e:
-        st.error(f"Error initializing vector store: {str(e)}")
+        st.error(f"Error building/loading FAISS vector store: {str(e)}")
         raise
+
 
 try:
-    chroma_db = build_or_load_vector_store()
+    faiss_db = build_or_load_vector_store()
     db_initialized = True
 except Exception as e:
-    st.error(f"Error initializing vector database: {str(e)}")
+    st.error(f"Vector DB initialization failed: {e}")
     db_initialized = False
 
 
 def generate_response(question):
-    llm = ChatGroq(
-        model="llama3-70b-8192",
-        temperature=0.1,
-        max_tokens=4096
-    )
-    
-    template = """
-    You are an expert legal assistant specializing in the Constitution of Pakistan (2024 Edition).
-    CONTEXT INFORMATION:
-    {context}
-    QUESTION: {question}
-    INSTRUCTIONS:
-    1. Parse the question to identify the precise constitutional provisions, principles, or mechanisms being queried.
-    2. Provide a structured, evidence-based response derived exclusively from the constitutional text provided in the context.
-    3. When citing specific provisions, use the standardized citation format: "Article X(Y)" for sections/clauses and "Part Z" for larger divisions.
-    4. For complex constitutional concepts, employ a hierarchical structure:
-       - Primary heading: Constitutional principle/mechanism
-       - Subheadings: Component elements
-       - Bullet points: Specific provisions and their implications
-    5. If the question falls outside the scope of the provided constitutional text:
-       - Clearly state the information gap
-       - Identify the specific constitutional provisions that would be needed
-       - Avoid speculative interpretation
-    6. Distinguish between:
-       - Explicit constitutional text (direct quotations)
-       - Constitutional mechanisms (procedural elements)
-       - Constitutional principles (underlying concepts)
-    RESPONSE FORMAT:
-    CONSTITUTIONAL ANALYSIS: [Concise summary of the relevant constitutional framework]
-    DETAILED RESPONSE:
-    [Structured explanation with appropriate headings and citation-backed statements]
-    RELEVANT PROVISIONS: [Complete list of all constitutional articles, sections, and clauses referenced]
-    LIMITATIONS: [If applicable, note any constraints in addressing the question based on the provided context]
-    """
-    
+    llm = ChatGroq(model="llama3-70b-8192", temperature=0.1, max_tokens=4096)
+
+    template = """..."""  # Keep your original system prompt
+
     prompt = ChatPromptTemplate.from_template(template)
-    
-    retriever = chroma_db.as_retriever(
-        search_type="mmr", 
+
+    retriever = faiss_db.as_retriever(
         search_kwargs={
-            "fetch_k": 15,  
-            "k": 7,  
-            "lambda_mult": 0.7,
+            "k": 7
         }
     )
-    
+
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
-    
+
     chain = (
         {
-            "context": retriever | format_docs, 
+            "context": retriever | format_docs,
             "question": RunnablePassthrough()
-        } 
-        | prompt 
-        | llm 
+        }
+        | prompt
+        | llm
         | StrOutputParser()
     )
-    
+
     try:
         response = chain.invoke(question)
-        return response if response.strip() else "The provided context does not contain the requested information."
+        return response.strip() or "The provided context does not contain the requested information."
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
@@ -235,7 +131,6 @@ with chat_container:
 
 if db_initialized:
     user_question = st.chat_input("Ask a question about the Constitution of Pakistan...")
-
     if user_question:
         st.chat_message("user").write(user_question)
         st.session_state.history.append({"role": "user", "content": user_question})
@@ -249,9 +144,4 @@ if db_initialized:
 else:
     st.warning("Vector database not initialized. Please check the error message above.")
 
-
-st.markdown("""
-<div class='footer'>
-    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
-</div>
-""", unsafe_allow_html=True)
+st.markdown("""<div class='footer'>© 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only</div>""", unsafe_allow_html=True)

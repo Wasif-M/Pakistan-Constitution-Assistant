@@ -2,8 +2,8 @@ import os
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
+from langchain_chroma import Chroma
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 # Create a data directory that works in Streamlit Cloud
-DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_faiss")
+DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Get API key from Streamlit secrets or environment variable
@@ -48,7 +48,7 @@ st.markdown("""
         padding: 20px;
         border-radius: 10px;
         border-left: 5px solid #01411C;
-        margin-bottom: 60px;
+        margin-bottom: 60px;  /* Space for fixed footer */
     }
     .footer {
         position: fixed;
@@ -62,6 +62,13 @@ st.markdown("""
         font-size: 0.8rem;
         border-top: 1px solid #f0f0f0;
         z-index: 100;
+    }
+    .loading {
+        text-align: center;
+        color: #01411C;
+    }
+    .chat-container {
+        margin-bottom: 70px;  /* Ensure content doesn't hide behind footer */
     }
 </style>
 """, unsafe_allow_html=True)
@@ -77,63 +84,104 @@ with st.sidebar:
     st.markdown("""
     This application uses RAG (Retrieval Augmented Generation) to answer questions about the Constitution of Pakistan.
     
+    It retrieves relevant sections from the constitution and generates expert legal responses based on the constitutional text.
+    
     **How it works:**
     1. Enter your question about Pakistan's Constitution
     2. The system retrieves relevant constitutional provisions
     3. An AI legal expert generates a structured analysis
     
-    **Data Source:** Official Constitution of Pakistan
+    **Data Source:** Official Constitution of Pakistan (2024 Edition)
     """)
+    
+    uploaded_pdf = st.file_uploader("Upload Constitution PDF", type="pdf")
     
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
 
 @st.cache_resource
-def build_or_load_vector_store():
-    """Build a new vector store if it doesn't exist, or load the existing one."""
+def build_or_load_vector_store(pdf_file=None):
+    """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
-        embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        index_path = os.path.join(DATA_DIR, "faiss_index")
+        embedding_model = FastEmbedEmbeddings()
+        db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
-        if not os.path.exists(index_path):
+        # If we have a PDF file uploaded or the database doesn't exist yet
+        if pdf_file is not None or not os.path.exists(db_file):
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                pdf_path = "data/constitution_of_pakistan.pdf"
-                if not os.path.exists(pdf_path):
-                    st.error(f"PDF file not found at path: {pdf_path}")
-                    return None
+                # If a file was uploaded, use it
+                if pdf_file is not None:
+                    # Save the uploaded file temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                        tmp_file.write(pdf_file.getvalue())
+                        pdf_path = tmp_file.name
+                else:
+                    # Use the default file path - first we need to check if the file exists
+                    default_pdf_path = "constitution_of_pakistan.pdf"
+                    if not os.path.exists(default_pdf_path):
+                        st.error(f"Default PDF file not found: {default_pdf_path}")
+                        st.info("Please upload a PDF of the Pakistan Constitution.")
+                        return None
+                    pdf_path = default_pdf_path
                 
+                # Load the document
                 docs = PyPDFLoader(pdf_path).load()
                 
+                # Clean the text
                 def clean_text(text):
                     return " ".join(text.split())
                 
                 cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
                 
+                # Split the documents
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=2000,
                     chunk_overlap=200
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                db = FAISS.from_documents(documents, embedding_model)
-                db.save_local(index_path)
-                return db
+                # Create the database
+                Chroma.from_documents(
+                    documents=documents,
+                    embedding=embedding_model,
+                    persist_directory=DATA_DIR
+                )
+                
+                # Delete the temporary file if it was created
+                if pdf_file is not None:
+                    try:
+                        os.unlink(pdf_path)
+                    except:
+                        pass
+                
+                return Chroma(
+                    persist_directory=DATA_DIR,
+                    embedding_function=embedding_model
+                )
+                
         else:
+            # Load the existing database
             with st.spinner("Loading existing vector database..."):
-                return FAISS.load_local(index_path, embedding_model, allow_dangerous_deserialization=True)
+                return Chroma(
+                    persist_directory=DATA_DIR,
+                    embedding_function=embedding_model
+                )
 
+    except ImportError:
+        st.error("FastEmbed not available. Please install with: pip install fastembed")
+        return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store
-faiss_db = build_or_load_vector_store()
-db_initialized = faiss_db is not None
+# Initialize the vector store based on the uploaded file or existing database
+chroma_db = build_or_load_vector_store(uploaded_pdf if 'uploaded_pdf' in locals() else None)
+db_initialized = chroma_db is not None
 
 def generate_response(question):
     if not GROQ_API_KEY:
-        return "Error: GROQ API key is missing."
+        return "Error: GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable."
         
     llm = ChatGroq(
         model="llama3-70b-8192",
@@ -142,43 +190,64 @@ def generate_response(question):
     )
     
     template = """
-    You are an expert legal assistant specializing in the Constitution of Pakistan.
+    You are an expert legal assistant specializing in the Constitution of Pakistan (2024 Edition).
     CONTEXT INFORMATION:
     {context}
     QUESTION: {question}
-    
-    Provide a structured response with:
-    1. Relevant constitutional articles
-    2. Legal interpretation
-    3. Practical implications
-    
-    Format citations as "Article X(Y)".
-    If unsure, state you couldn't find relevant provisions.
+    INSTRUCTIONS:
+    1. Parse the question to identify the precise constitutional provisions, principles, or mechanisms being queried.
+    2. Provide a structured, evidence-based response derived exclusively from the constitutional text provided in the context.
+    3. When citing specific provisions, use the standardized citation format: "Article X(Y)" for sections/clauses and "Part Z" for larger divisions.
+    4. For complex constitutional concepts, employ a hierarchical structure:
+       - Primary heading: Constitutional principle/mechanism
+       - Subheadings: Component elements
+       - Bullet points: Specific provisions and their implications
+    5. If the question falls outside the scope of the provided constitutional text:
+       - Clearly state the information gap
+       - Identify the specific constitutional provisions that would be needed
+       - Avoid speculative interpretation
+    6. Distinguish between:
+       - Explicit constitutional text (direct quotations)
+       - Constitutional mechanisms (procedural elements)
+       - Constitutional principles (underlying concepts)
+    RESPONSE FORMAT:
+    CONSTITUTIONAL ANALYSIS: [Concise summary of the relevant constitutional framework]
+    DETAILED RESPONSE:
+    [Structured explanation with appropriate headings and citation-backed statements]
+    RELEVANT PROVISIONS: [Complete list of all constitutional articles, sections, and clauses referenced]
+    LIMITATIONS: [If applicable, note any constraints in addressing the question based on the provided context]
     """
     
     prompt = ChatPromptTemplate.from_template(template)
     
-    retriever = faiss_db.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 5, "fetch_k": 10}
+    retriever = chroma_db.as_retriever(
+        search_type="mmr", 
+        search_kwargs={
+            "fetch_k": 15,  
+            "k": 7,  
+            "lambda_mult": 0.7,
+        }
     )
     
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
     
     chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
+        {
+            "context": retriever | format_docs, 
+            "question": RunnablePassthrough()
+        } 
+        | prompt 
+        | llm 
         | StrOutputParser()
     )
     
     try:
-        return chain.invoke(question)
+        response = chain.invoke(question)
+        return response if response.strip() else "The provided context does not contain the requested information."
     except Exception as e:
-        return f"Error generating response: {str(e)}"
+        return f"An error occurred: {str(e)}"
 
-# Chat interface
 chat_container = st.container()
 
 with chat_container:
@@ -199,13 +268,14 @@ if db_initialized:
         st.session_state.history.append({"role": "user", "content": user_question})
 
         with st.chat_message("assistant"):
-            with st.spinner("Analyzing constitutional provisions..."):
+            with st.spinner("Generating response..."):
                 response = generate_response(user_question)
                 st.markdown(f"<div class='response-container'>{response}</div>", unsafe_allow_html=True)
 
         st.session_state.history.append({"role": "assistant", "content": response})
 else:
-    st.warning("Vector database not initialized. Please check that the Constitution PDF exists at 'data/constitution_of_pakistan.pdf'.")
+    if 'uploaded_pdf' not in locals() or uploaded_pdf is None:
+        st.warning("Please upload the Constitution of Pakistan PDF to initialize the application.")
 
 st.markdown("""
 <div class='footer'>

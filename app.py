@@ -2,7 +2,7 @@ import os
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_chroma import Chroma
+from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
@@ -10,21 +10,18 @@ from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 
-# Streamlit page config
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
     page_icon="🇵🇰",
     layout="wide"
 )
 
-# Cloud-friendly paths
 DATA_DIR = "./data"
 PERSIST_DIRECTORY = f"{DATA_DIR}/pakistan_constitution_db"
 PDF_PATH = f"{DATA_DIR}/constitution_of_pakistan.pdf"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
 
-# CSS styling
 st.markdown("""
 <style>
     .main-header {
@@ -58,18 +55,18 @@ st.markdown("""
         border-top: 1px solid #f0f0f0;
         z-index: 100;
     }
+    .emoji-fix {
+        font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Android Emoji", sans-serif;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# App header
-st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
+st.markdown("<h1 class='main-header'><span class='emoji-fix'>🇵🇰</span> Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
-# Initialize chat history
 if 'history' not in st.session_state:
     st.session_state.history = []
 
-# Sidebar
 with st.sidebar:
     st.markdown("<h2 class='sub-header'>About</h2>", unsafe_allow_html=True)
     st.markdown("""
@@ -87,22 +84,22 @@ with st.sidebar:
         st.session_state.history = []
         st.rerun()
 
-# Vector database setup
 @st.cache_resource
 def build_or_load_vector_store():
     try:
-        from langchain_community.embeddings import FastEmbedEmbeddings
-        embedding_model = FastEmbedEmbeddings()
-
-        if os.path.exists(f"{PERSIST_DIRECTORY}/chroma.sqlite3"):
+        embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        
+        faiss_index_exists = os.path.exists(f"{PERSIST_DIRECTORY}/index.faiss")
+        
+        if faiss_index_exists:
             with st.spinner("Loading existing vector database..."):
-                return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
-                    embedding_function=embedding_model
+                return FAISS.load_local(
+                    folder_path=PERSIST_DIRECTORY,
+                    embeddings=embedding_model,
+                    allow_dangerous_deserialization=True
                 )
         else:
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # Load and clean PDF
                 docs = PyPDFLoader(PDF_PATH).load()
                 
                 def clean_text(text):
@@ -110,38 +107,32 @@ def build_or_load_vector_store():
                 
                 cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
                 
-                # Split documents
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=2000,
                     chunk_overlap=200
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                # Create and persist vector store
-                Chroma.from_documents(
+                vector_store = FAISS.from_documents(
                     documents=documents,
-                    embedding=embedding_model,
-                    persist_directory=PERSIST_DIRECTORY
+                    embedding=embedding_model
                 )
                 
-                return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
-                    embedding_function=embedding_model
-                )
+                vector_store.save_local(PERSIST_DIRECTORY)
+                
+                return vector_store
 
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize vector store
 try:
-    chroma_db = build_or_load_vector_store()
-    db_initialized = True
+    vector_db = build_or_load_vector_store()
+    db_initialized = vector_db is not None
 except Exception as e:
     st.error(f"Error initializing vector database: {str(e)}")
     db_initialized = False
 
-# Response generation function
 def generate_response(question):
     llm = ChatGroq(
         model="llama3-70b-8192",
@@ -177,12 +168,10 @@ def generate_response(question):
     
     prompt = ChatPromptTemplate.from_template(template)
     
-    retriever = chroma_db.as_retriever(
-        search_type="mmr", 
+    retriever = vector_db.as_retriever(
+        search_type="similarity", 
         search_kwargs={
-            "fetch_k": 15,
-            "k": 7,
-            "lambda_mult": 0.7,
+            "k": 7
         }
     )
     
@@ -205,7 +194,6 @@ def generate_response(question):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
-# Chat interface
 chat_container = st.container()
 
 with chat_container:
@@ -218,7 +206,6 @@ with chat_container:
                 unsafe_allow_html=True
             )
 
-# User input and processing
 if db_initialized:
     user_question = st.chat_input("Ask a question about the Constitution of Pakistan...")
 
@@ -235,7 +222,6 @@ if db_initialized:
 else:
     st.warning("Vector database not initialized. Please check the error message above.")
 
-# Footer
 st.markdown("""
 <div class='footer'>
     © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only

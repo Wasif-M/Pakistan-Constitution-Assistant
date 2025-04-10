@@ -45,11 +45,12 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     .response-container {
-        background-color: #f8f9fa;
+        background-color: rgba(248, 249, 250, 0.05);
         padding: 20px;
         border-radius: 10px;
         border-left: 5px solid #01411C;
         margin-bottom: 60px;  /* Space for fixed footer */
+        color: inherit;  /* Inherit text color from parent */
     }
     .footer {
         position: fixed;
@@ -58,10 +59,10 @@ st.markdown("""
         right: 0;
         text-align: center;
         padding: 10px;
-        background-color: white;
-        color: gray;
+        background-color: rgba(255, 255, 255, 0.1);  /* Semi-transparent background */
+        color: inherit;  /* Inherit text color from parent */
         font-size: 0.8rem;
-        border-top: 1px solid #f0f0f0;
+        border-top: 1px solid rgba(240, 240, 240, 0.1);
         z-index: 100;
     }
     .loading {
@@ -74,6 +75,15 @@ st.markdown("""
     /* Ensure emoji displays properly across browsers */
     .emoji-fix {
         font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Android Emoji", sans-serif;
+    }
+    /* Dark mode compatibility */
+    @media (prefers-color-scheme: dark) {
+        .main-header, .sub-header {
+            color: #3ed160;  /* Brighter green for dark mode */
+        }
+        .response-container {
+            border-left-color: #3ed160;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -267,6 +277,7 @@ if db_initialized:
         with st.chat_message("assistant"):
             with st.spinner("Generating response..."):
                 response = generate_response(user_question)
+                # Use markdown_safe to ensure text is visible in both light and dark modes
                 st.markdown(f"<div class='response-container'>{response}</div>", unsafe_allow_html=True)
 
         st.session_state.history.append({"role": "assistant", "content": response})

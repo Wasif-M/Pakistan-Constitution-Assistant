@@ -2,7 +2,7 @@ import os
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import Chroma
+from langchain_community.vectorstores import FAISS  # Changed from Chroma to FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
@@ -20,8 +20,8 @@ st.set_page_config(
 # Create a data directory that works in Streamlit Cloud
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
+INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")  # Path for FAISS index
 
-# Get API key from Streamlit secrets
 # Get API key from Streamlit secrets or environment variable
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
 if not GROQ_API_KEY:
@@ -45,11 +45,12 @@ st.markdown("""
         margin-bottom: 1rem;
     }
     .response-container {
-        background-color: #f8f9fa;
+        background-color: rgba(248, 249, 250, 0.05);
         padding: 20px;
         border-radius: 10px;
         border-left: 5px solid #01411C;
         margin-bottom: 60px;  /* Space for fixed footer */
+        color: inherit;  /* Inherit text color from parent */
     }
     .footer {
         position: fixed;
@@ -58,10 +59,10 @@ st.markdown("""
         right: 0;
         text-align: center;
         padding: 10px;
-        background-color: white;
-        color: gray;
+        background-color: rgba(255, 255, 255, 0.1);  /* Semi-transparent background */
+        color: inherit;  /* Inherit text color from parent */
         font-size: 0.8rem;
-        border-top: 1px solid #f0f0f0;
+        border-top: 1px solid rgba(240, 240, 240, 0.1);
         z-index: 100;
     }
     .loading {
@@ -74,6 +75,15 @@ st.markdown("""
     /* Ensure emoji displays properly across browsers */
     .emoji-fix {
         font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Android Emoji", sans-serif;
+    }
+    /* Dark mode compatibility */
+    @media (prefers-color-scheme: dark) {
+        .main-header, .sub-header {
+            color: #3ed160;  /* Brighter green for dark mode */
+        }
+        .response-container {
+            border-left-color: #3ed160;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -102,7 +112,7 @@ with st.sidebar:
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
-        
+    
     st.markdown("""
     **Note:** This application uses a pre-loaded Constitution of Pakistan PDF located in the data directory.
     """)
@@ -113,66 +123,70 @@ def build_or_load_vector_store():
     try:
         # Using a reliable model for Streamlit deployment
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
-        # If database doesn't exist yet
-        if not os.path.exists(db_file):
-            with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # Use the fixed PDF path
-                pdf_path = "data/constitution_of_pakistan.pdf"
-                if not os.path.exists(pdf_path):
-                    st.error(f"PDF file not found at path: {pdf_path}")
-                    st.info("Please ensure the Constitution PDF is in the data directory.")
-                    return None
-                
-                # Load the document
-                docs = PyPDFLoader(pdf_path).load()
-                
-                # Clean the text
-                def clean_text(text):
-                    return " ".join(text.split())
-                
-                cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
-                
-                # Split the documents
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=2000,
-                    chunk_overlap=200
-                )
-                documents = text_splitter.split_documents(cleaned_docs)
-                
-                # Create the database
-                Chroma.from_documents(
-                    documents=documents,
-                    embedding=embedding_model,
-                    persist_directory=DATA_DIR
-                )
-                
-                # No temporary files to delete since we're using a fixed path
-                
-                return Chroma(
-                    persist_directory=DATA_DIR,
-                    embedding_function=embedding_model
-                )
-                
-        else:
-            # Load the existing database
+        # Check for existing FAISS index
+        if os.path.exists(INDEX_PATH):
+            # Load the existing FAISS index
             with st.spinner("Loading existing vector database..."):
-                return Chroma(
-                    persist_directory=DATA_DIR,
-                    embedding_function=embedding_model
+                vector_store = FAISS.load_local(
+                    folder_path=INDEX_PATH,
+                    embeddings=embedding_model,
+                    allow_dangerous_deserialization=True  # Added this parameter
                 )
+                return vector_store
+        
+        # If no existing index, create a new one
+        with st.spinner("Building new vector database (this may take a few minutes)..."):
+            # Use the fixed PDF path
+            pdf_path = "data/constitution_of_pakistan.pdf"
+            
+            if not pdf_path:
+                st.error("No PDF path defined. Please check your configuration.")
+                return None
+            
+            if not os.path.exists(pdf_path):
+                st.error(f"PDF file not found at path: {pdf_path}")
+                return None
+            
+            # Load the document
+            docs = PyPDFLoader(pdf_path).load()
+            
+            # Clean the text
+            def clean_text(text):
+                return " ".join(text.split())
+            
+            cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
+            
+            # Split the documents
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=2000,
+                chunk_overlap=200
+            )
+            documents = text_splitter.split_documents(cleaned_docs)
+            
+            # Create the FAISS vector store
+            vector_store = FAISS.from_documents(
+                documents=documents,
+                embedding=embedding_model
+            )
+            
+            # Save the index
+            vector_store.save_local(INDEX_PATH)
+            
+            # Using fixed PDF path, no cleanup needed
+                
+            return vector_store
 
-    except ImportError:
-        st.error("Required embedding models not available. Please check your installation.")
+    except ImportError as e:
+        st.error(f"Required dependency not available: {str(e)}")
         return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store using the fixed PDF path
-chroma_db = build_or_load_vector_store()
-db_initialized = chroma_db is not None
+# Initialize the vector store
+vector_db = build_or_load_vector_store()
+db_initialized = vector_db is not None
 
 def generate_response(question):
     if not GROQ_API_KEY:
@@ -215,12 +229,10 @@ def generate_response(question):
     
     prompt = ChatPromptTemplate.from_template(template)
     
-    retriever = chroma_db.as_retriever(
-        search_type="mmr", 
+    retriever = vector_db.as_retriever(
+        search_type="similarity",  # FAISS uses similarity search
         search_kwargs={
-            "fetch_k": 15,  
-            "k": 7,  
-            "lambda_mult": 0.7,
+            "k": 7,  # Retrieve top 7 most relevant chunks
         }
     )
     
@@ -265,6 +277,7 @@ if db_initialized:
         with st.chat_message("assistant"):
             with st.spinner("Generating response..."):
                 response = generate_response(user_question)
+                # Use markdown_safe to ensure text is visible in both light and dark modes
                 st.markdown(f"<div class='response-container'>{response}</div>", unsafe_allow_html=True)
 
         st.session_state.history.append({"role": "assistant", "content": response})

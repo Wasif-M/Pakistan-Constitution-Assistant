@@ -1,3 +1,4 @@
+
 import os
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -103,21 +104,8 @@ with st.sidebar:
         st.session_state.history = []
         st.rerun()
     
-    # Option to upload a PDF file
-    uploaded_file = st.file_uploader("Upload Constitution PDF", type="pdf")
-    
-    if uploaded_file:
-        # Save the uploaded file to a temporary location
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-            tmp_file.write(uploaded_file.getvalue())
-            temp_pdf_path = tmp_file.name
-        
-        st.session_state['pdf_path'] = temp_pdf_path
-        st.success("PDF uploaded successfully!")
-    
     st.markdown("""
-    **Note:** You can either upload a Constitution of Pakistan PDF or use the pre-loaded file
-    located in the data directory (if available).
+    **Note:** This application uses a pre-loaded Constitution of Pakistan PDF located in the data directory.
     """)
 
 @st.cache_resource
@@ -139,14 +127,11 @@ def build_or_load_vector_store():
         
         # If no existing index, create a new one
         with st.spinner("Building new vector database (this may take a few minutes)..."):
-            # Determine PDF path
-            pdf_path = st.session_state.get('pdf_path', None)
-            
-            if not pdf_path and os.path.exists("data/constitution_of_pakistan.pdf"):
-                pdf_path = "data/constitution_of_pakistan.pdf"
+            # Use the fixed PDF path
+            pdf_path = "data/constitution_of_pakistan.pdf"
             
             if not pdf_path:
-                st.error("No PDF found. Please upload a Constitution PDF file.")
+                st.error("No PDF path defined. Please check your configuration.")
                 return None
             
             if not os.path.exists(pdf_path):
@@ -178,13 +163,7 @@ def build_or_load_vector_store():
             # Save the index
             vector_store.save_local(INDEX_PATH)
             
-            # If we used a temporary PDF file, clean it up
-            if pdf_path == st.session_state.get('pdf_path', None):
-                try:
-                    os.unlink(pdf_path)
-                    del st.session_state['pdf_path']
-                except:
-                    pass
+            # Using fixed PDF path, no cleanup needed
                 
             return vector_store
 
@@ -292,7 +271,7 @@ if db_initialized:
 
         st.session_state.history.append({"role": "assistant", "content": response})
 else:
-    st.info("Please upload a Constitution PDF file to initialize the vector database.")
+    st.warning("Vector database not initialized. Please check that the Constitution PDF exists at 'data/constitution_of_pakistan.pdf'.")
 
 st.markdown("""
 <div class='footer'>

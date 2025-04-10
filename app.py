@@ -91,9 +91,9 @@ with st.sidebar:
 @st.cache_resource
 def build_or_load_vector_store():
     try:
-        from langchain_community.embeddings import FastEmbedEmbeddings
-        embedding_model = FastEmbedEmbeddings()
-
+        # Use HuggingFace embeddings instead of FastEmbed for better compatibility
+        embedding_model = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        
         if os.path.exists(f"{PERSIST_DIRECTORY}/chroma.sqlite3"):
             with st.spinner("Loading existing vector database..."):
                 return Chroma(
@@ -101,6 +101,10 @@ def build_or_load_vector_store():
                     embedding_function=embedding_model
                 )
         else:
+            if not os.path.exists(PDF_PATH):
+                st.error(f"PDF file not found at {PDF_PATH}. Please upload the constitution PDF.")
+                return None
+                
             with st.spinner("Building new vector database (this may take a few minutes)..."):
                 # Load and clean PDF
                 docs = PyPDFLoader(PDF_PATH).load()
@@ -118,16 +122,13 @@ def build_or_load_vector_store():
                 documents = text_splitter.split_documents(cleaned_docs)
                 
                 # Create and persist vector store
-                Chroma.from_documents(
+                vector_store = Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
                     persist_directory=PERSIST_DIRECTORY
                 )
                 
-                return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
-                    embedding_function=embedding_model
-                )
+                return vector_store
 
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
@@ -136,13 +137,16 @@ def build_or_load_vector_store():
 # Initialize vector store
 try:
     chroma_db = build_or_load_vector_store()
-    db_initialized = True
+    db_initialized = chroma_db is not None
 except Exception as e:
     st.error(f"Error initializing vector database: {str(e)}")
     db_initialized = False
 
 # Response generation function
 def generate_response(question):
+    if not db_initialized:
+        return "Vector database not initialized. Cannot answer questions."
+    
     llm = ChatGroq(
         model="llama3-70b-8192",
         temperature=0.1,

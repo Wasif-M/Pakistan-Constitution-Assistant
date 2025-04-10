@@ -29,7 +29,7 @@ if not GROQ_API_KEY:
 
 # Set environment variables
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1""
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
 st.markdown("""
 <style>

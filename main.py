@@ -21,6 +21,7 @@ st.set_page_config(
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 
+# Get API key from Streamlit secrets
 # Get API key from Streamlit secrets or environment variable
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
 if not GROQ_API_KEY:

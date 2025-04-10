@@ -1,11 +1,9 @@
 import os
-import chromadb
-from chromadb.config import Settings
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-#from langchain_chroma import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
@@ -20,7 +18,7 @@ st.set_page_config(
 )
 
 # Create a data directory that works in Streamlit Cloud
-DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
+DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_faiss")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Get API key from Streamlit secrets or environment variable
@@ -31,7 +29,6 @@ if not GROQ_API_KEY:
 # Set environment variables
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-os.environ["CHROMA_DB_IMPL"] = "duckdb"
 
 st.markdown("""
 <style>
@@ -51,7 +48,7 @@ st.markdown("""
         padding: 20px;
         border-radius: 10px;
         border-left: 5px solid #01411C;
-        margin-bottom: 60px;  /* Space for fixed footer */
+        margin-bottom: 60px;
     }
     .footer {
         position: fixed;
@@ -65,13 +62,6 @@ st.markdown("""
         font-size: 0.8rem;
         border-top: 1px solid #f0f0f0;
         z-index: 100;
-    }
-    .loading {
-        text-align: center;
-        color: #01411C;
-    }
-    .chat-container {
-        margin-bottom: 70px;  /* Ensure content doesn't hide behind footer */
     }
 </style>
 """, unsafe_allow_html=True)
@@ -87,41 +77,32 @@ with st.sidebar:
     st.markdown("""
     This application uses RAG (Retrieval Augmented Generation) to answer questions about the Constitution of Pakistan.
     
-    It retrieves relevant sections from the constitution and generates expert legal responses based on the constitutional text.
-    
     **How it works:**
     1. Enter your question about Pakistan's Constitution
     2. The system retrieves relevant constitutional provisions
     3. An AI legal expert generates a structured analysis
     
-    **Data Source:** Official Constitution of Pakistan (2024 Edition)
+    **Data Source:** Official Constitution of Pakistan
     """)
     
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
-        
-    st.markdown("""
-    **Note:** This application uses a pre-loaded Constitution of Pakistan PDF located in the data directory.
-    """)
 
 @st.cache_resource
 def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        index_path = os.path.join(DATA_DIR, "faiss_index")
         
-        # Check if the database exists
-        db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
-        
-        if not os.path.exists(db_file):
+        if not os.path.exists(index_path):
             with st.spinner("Building new vector database (this may take a few minutes)..."):
                 pdf_path = "data/constitution_of_pakistan.pdf"
                 if not os.path.exists(pdf_path):
                     st.error(f"PDF file not found at path: {pdf_path}")
                     return None
                 
-                # Load and process the document
                 docs = PyPDFLoader(pdf_path).load()
                 
                 def clean_text(text):
@@ -135,43 +116,24 @@ def build_or_load_vector_store():
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                # Create the database with explicit settings
-                db = Chroma.from_documents(
-                    documents=documents,
-                    embedding=embedding_model,
-                    persist_directory=DATA_DIR,
-                    client_settings=chromadb.config.Settings(
-                        chroma_db_impl="duckdb+parquet",
-                        persist_directory=DATA_DIR,
-                        anonymized_telemetry=False
-                    )
-                )
-                db.persist()
+                db = FAISS.from_documents(documents, embedding_model)
+                db.save_local(index_path)
                 return db
         else:
-            # Load existing database
             with st.spinner("Loading existing vector database..."):
-                return Chroma(
-                    persist_directory=DATA_DIR,
-                    embedding_function=embedding_model,
-                    client_settings=chromadb.config.Settings(
-                        chroma_db_impl="duckdb+parquet",
-                        persist_directory=DATA_DIR,
-                        anonymized_telemetry=False
-                    )
-                )
+                return FAISS.load_local(index_path, embedding_model, allow_dangerous_deserialization=True)
 
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store using the fixed PDF path
-chroma_db = build_or_load_vector_store()
-db_initialized = chroma_db is not None
+# Initialize the vector store
+faiss_db = build_or_load_vector_store()
+db_initialized = faiss_db is not None
 
 def generate_response(question):
     if not GROQ_API_KEY:
-        return "Error: GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable."
+        return "Error: GROQ API key is missing."
         
     llm = ChatGroq(
         model="llama3-70b-8192",
@@ -180,64 +142,43 @@ def generate_response(question):
     )
     
     template = """
-    You are an expert legal assistant specializing in the Constitution of Pakistan (2024 Edition).
+    You are an expert legal assistant specializing in the Constitution of Pakistan.
     CONTEXT INFORMATION:
     {context}
     QUESTION: {question}
-    INSTRUCTIONS:
-    1. Parse the question to identify the precise constitutional provisions, principles, or mechanisms being queried.
-    2. Provide a structured, evidence-based response derived exclusively from the constitutional text provided in the context.
-    3. When citing specific provisions, use the standardized citation format: "Article X(Y)" for sections/clauses and "Part Z" for larger divisions.
-    4. For complex constitutional concepts, employ a hierarchical structure:
-       - Primary heading: Constitutional principle/mechanism
-       - Subheadings: Component elements
-       - Bullet points: Specific provisions and their implications
-    5. If the question falls outside the scope of the provided constitutional text:
-       - Clearly state the information gap
-       - Identify the specific constitutional provisions that would be needed
-       - Avoid speculative interpretation
-    6. Distinguish between:
-       - Explicit constitutional text (direct quotations)
-       - Constitutional mechanisms (procedural elements)
-       - Constitutional principles (underlying concepts)
-    RESPONSE FORMAT:
-    CONSTITUTIONAL ANALYSIS: [Concise summary of the relevant constitutional framework]
-    DETAILED RESPONSE:
-    [Structured explanation with appropriate headings and citation-backed statements]
-    RELEVANT PROVISIONS: [Complete list of all constitutional articles, sections, and clauses referenced]
-    LIMITATIONS: [If applicable, note any constraints in addressing the question based on the provided context]
+    
+    Provide a structured response with:
+    1. Relevant constitutional articles
+    2. Legal interpretation
+    3. Practical implications
+    
+    Format citations as "Article X(Y)".
+    If unsure, state you couldn't find relevant provisions.
     """
     
     prompt = ChatPromptTemplate.from_template(template)
     
-    retriever = chroma_db.as_retriever(
-        search_type="mmr", 
-        search_kwargs={
-            "fetch_k": 15,  
-            "k": 7,  
-            "lambda_mult": 0.7,
-        }
+    retriever = faiss_db.as_retriever(
+        search_type="mmr",
+        search_kwargs={"k": 5, "fetch_k": 10}
     )
     
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
     
     chain = (
-        {
-            "context": retriever | format_docs, 
-            "question": RunnablePassthrough()
-        } 
-        | prompt 
-        | llm 
+        {"context": retriever | format_docs, "question": RunnablePassthrough()}
+        | prompt
+        | llm
         | StrOutputParser()
     )
     
     try:
-        response = chain.invoke(question)
-        return response if response.strip() else "The provided context does not contain the requested information."
+        return chain.invoke(question)
     except Exception as e:
-        return f"An error occurred: {str(e)}"
+        return f"Error generating response: {str(e)}"
 
+# Chat interface
 chat_container = st.container()
 
 with chat_container:
@@ -258,7 +199,7 @@ if db_initialized:
         st.session_state.history.append({"role": "user", "content": user_question})
 
         with st.chat_message("assistant"):
-            with st.spinner("Generating response..."):
+            with st.spinner("Analyzing constitutional provisions..."):
                 response = generate_response(user_question)
                 st.markdown(f"<div class='response-container'>{response}</div>", unsafe_allow_html=True)
 

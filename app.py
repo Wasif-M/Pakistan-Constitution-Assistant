@@ -22,14 +22,14 @@ DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Get API key from Streamlit secrets
-GROQ_API_KEY = st.secrets["GROQ_API_KEY"]  # Access the API key directly from the secrets file
-
+# Get API key from Streamlit secrets or environment variable
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
 if not GROQ_API_KEY:
-    st.error("GROQ API key is missing. Please set it in your Streamlit secrets.toml file.")
+    st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
 
 # Set environment variables
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
-os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1""
 
 st.markdown("""
 <style>

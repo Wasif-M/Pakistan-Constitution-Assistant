@@ -3,7 +3,7 @@ import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_chroma import Chroma
-from langchain_community.embeddings import FastEmbedEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
@@ -104,7 +104,8 @@ with st.sidebar:
 def build_or_load_vector_store(pdf_file=None):
     """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
-        embedding_model = FastEmbedEmbeddings()
+        # Using a more reliable model for Streamlit deployment
+        embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
         # If we have a PDF file uploaded or the database doesn't exist yet
@@ -169,7 +170,7 @@ def build_or_load_vector_store(pdf_file=None):
                 )
 
     except ImportError:
-        st.error("FastEmbed not available. Please install with: pip install fastembed")
+        st.error("Required embedding models not available. Please check your installation.")
         return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")

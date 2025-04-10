@@ -94,37 +94,31 @@ with st.sidebar:
     **Data Source:** Official Constitution of Pakistan (2024 Edition)
     """)
     
-    uploaded_pdf = st.file_uploader("Upload Constitution PDF", type="pdf")
-    
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
+        
+    st.markdown("""
+    **Note:** This application uses a pre-loaded Constitution of Pakistan PDF located in the data directory.
+    """)
 
 @st.cache_resource
-def build_or_load_vector_store(pdf_file=None):
-    """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
+def build_or_load_vector_store():
+    """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
-        # Using a more reliable model for Streamlit deployment
+        # Using a reliable model for Streamlit deployment
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
-        # If we have a PDF file uploaded or the database doesn't exist yet
-        if pdf_file is not None or not os.path.exists(db_file):
+        # If database doesn't exist yet
+        if not os.path.exists(db_file):
             with st.spinner("Building new vector database (this may take a few minutes)..."):
-                # If a file was uploaded, use it
-                if pdf_file is not None:
-                    # Save the uploaded file temporarily
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-                        tmp_file.write(pdf_file.getvalue())
-                        pdf_path = tmp_file.name
-                else:
-                    # Use the default file path - first we need to check if the file exists
-                    default_pdf_path = "constitution_of_pakistan.pdf"
-                    if not os.path.exists(default_pdf_path):
-                        st.error(f"Default PDF file not found: {default_pdf_path}")
-                        st.info("Please upload a PDF of the Pakistan Constitution.")
-                        return None
-                    pdf_path = default_pdf_path
+                # Use the fixed PDF path
+                pdf_path = "data/constitution_of_pakistan.pdf"
+                if not os.path.exists(pdf_path):
+                    st.error(f"PDF file not found at path: {pdf_path}")
+                    st.info("Please ensure the Constitution PDF is in the data directory.")
+                    return None
                 
                 # Load the document
                 docs = PyPDFLoader(pdf_path).load()
@@ -149,12 +143,7 @@ def build_or_load_vector_store(pdf_file=None):
                     persist_directory=DATA_DIR
                 )
                 
-                # Delete the temporary file if it was created
-                if pdf_file is not None:
-                    try:
-                        os.unlink(pdf_path)
-                    except:
-                        pass
+                # No temporary files to delete since we're using a fixed path
                 
                 return Chroma(
                     persist_directory=DATA_DIR,
@@ -176,8 +165,8 @@ def build_or_load_vector_store(pdf_file=None):
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store based on the uploaded file or existing database
-chroma_db = build_or_load_vector_store(uploaded_pdf if 'uploaded_pdf' in locals() else None)
+# Initialize the vector store using the fixed PDF path
+chroma_db = build_or_load_vector_store()
 db_initialized = chroma_db is not None
 
 def generate_response(question):
@@ -275,8 +264,7 @@ if db_initialized:
 
         st.session_state.history.append({"role": "assistant", "content": response})
 else:
-    if 'uploaded_pdf' not in locals() or uploaded_pdf is None:
-        st.warning("Please upload the Constitution of Pakistan PDF to initialize the application.")
+    st.warning("Vector database not initialized. Please check that the Constitution PDF exists at 'data/constitution_of_pakistan.pdf'.")
 
 st.markdown("""
 <div class='footer'>

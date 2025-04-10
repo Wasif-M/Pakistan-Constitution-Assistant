@@ -13,21 +13,21 @@ import tempfile
 
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
-    page_icon="🇵🇰",  # Using Pakistan flag emoji
+    page_icon="🇵🇰",  
     layout="wide"
 )
 
-# Create a data directory that works in Streamlit Cloud
+\
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
-INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")  # Path for FAISS index
+INDEX_PATH = os.path.join(DATA_DIR, "faiss_index") 
 
-# Get API key from Streamlit secrets or environment variable
+
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
 if not GROQ_API_KEY:
     st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
 
-# Set environment variables
+
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
@@ -121,23 +121,22 @@ with st.sidebar:
 def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
-        # Using a reliable model for Streamlit deployment
+        
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
-        # Check for existing FAISS index
+        
         if os.path.exists(INDEX_PATH):
-            # Load the existing FAISS index
             with st.spinner("Loading existing vector database..."):
                 vector_store = FAISS.load_local(
                     folder_path=INDEX_PATH,
                     embeddings=embedding_model,
-                    allow_dangerous_deserialization=True  # Added this parameter
+                    allow_dangerous_deserialization=True  
                 )
                 return vector_store
         
-        # If no existing index, create a new one
+        
         with st.spinner("Building new vector database (this may take a few minutes)..."):
-            # Use the fixed PDF path
+        
             pdf_path = "data/constitution_of_pakistan.pdf"
             
             if not pdf_path:
@@ -148,32 +147,28 @@ def build_or_load_vector_store():
                 st.error(f"PDF file not found at path: {pdf_path}")
                 return None
             
-            # Load the document
+            
             docs = PyPDFLoader(pdf_path).load()
             
-            # Clean the text
+    
             def clean_text(text):
                 return " ".join(text.split())
             
             cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
             
-            # Split the documents
+        
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=2000,
                 chunk_overlap=200
             )
             documents = text_splitter.split_documents(cleaned_docs)
-            
-            # Create the FAISS vector store
             vector_store = FAISS.from_documents(
                 documents=documents,
                 embedding=embedding_model
             )
             
-            # Save the index
             vector_store.save_local(INDEX_PATH)
             
-            # Using fixed PDF path, no cleanup needed
                 
             return vector_store
 
@@ -184,7 +179,7 @@ def build_or_load_vector_store():
         st.error(f"Error initializing vector store: {str(e)}")
         return None
 
-# Initialize the vector store
+
 vector_db = build_or_load_vector_store()
 db_initialized = vector_db is not None
 
@@ -230,9 +225,9 @@ def generate_response(question):
     prompt = ChatPromptTemplate.from_template(template)
     
     retriever = vector_db.as_retriever(
-        search_type="similarity",  # FAISS uses similarity search
+        search_type="similarity", 
         search_kwargs={
-            "k": 7,  # Retrieve top 7 most relevant chunks
+            "k": 7,  
         }
     )
     
@@ -277,7 +272,7 @@ if db_initialized:
         with st.chat_message("assistant"):
             with st.spinner("Generating response..."):
                 response = generate_response(user_question)
-                # Use markdown_safe to ensure text is visible in both light and dark modes
+                
                 st.markdown(f"<div class='response-container'>{response}</div>", unsafe_allow_html=True)
 
         st.session_state.history.append({"role": "assistant", "content": response})

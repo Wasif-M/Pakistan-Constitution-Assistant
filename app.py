@@ -146,7 +146,7 @@ def build_or_load_vector_store(pdf_file=None):
                 Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
-                    persist_directory=DATA_DIR
+                    #persist_directory=DATA_DIR
                 )
                 
                 # Delete the temporary file if it was created

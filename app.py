@@ -1,23 +1,15 @@
 import os
 import streamlit as st
-
-# === SQLite Fix for ChromaDB on Streamlit Cloud ===
-# This needs to be done before any ChromaDB or Langchain imports
-__import__('pysqlite3')
-import sys
-sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-# =====================================================
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_chroma import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-
+import tempfile
 
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
@@ -25,19 +17,18 @@ st.set_page_config(
     layout="wide"
 )
 
-# Use relative paths for deployment
-PERSIST_DIRECTORY = "pakistan_constitution_db"
-os.makedirs(PERSIST_DIRECTORY, exist_ok=True)
+# Create a data directory that works in Streamlit Cloud
+DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-# Get API keys from Streamlit secrets for secure deployment
-# Make sure to set these in your Streamlit secrets.toml or environment variables
-groq_api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", "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"))
-os.environ["GROQ_API_KEY"] = groq_api_key
+# Get API key from Streamlit secrets or environment variable
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+if not GROQ_API_KEY:
+    st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
+
+# Set environment variables
+os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
-
-# Show warning if API key not configured
-if not groq_api_key:
-    st.warning("⚠️ GROQ API Key not found. Please set it in your secrets or environment variables.")
 
 st.markdown("""
 <style>
@@ -82,14 +73,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
 st.markdown("<h1 class='main-header'>🇵🇰 Pakistan Constitution Assistant</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Ask questions about the Constitution of Pakistan and get expert legal analysis</p>", unsafe_allow_html=True)
 
-
 if 'history' not in st.session_state:
     st.session_state.history = []
-
 
 with st.sidebar:
     st.markdown("<h2 class='sub-header'>About</h2>", unsafe_allow_html=True)
@@ -106,121 +94,95 @@ with st.sidebar:
     **Data Source:** Official Constitution of Pakistan (2024 Edition)
     """)
     
+    uploaded_pdf = st.file_uploader("Upload Constitution PDF", type="pdf")
+    
     if st.button("Clear Chat History"):
         st.session_state.history = []
         st.rerun()
 
-    # Debug information - uncomment to help troubleshoot
-    if st.checkbox("Show Debug Info"):
-        st.write("Current working directory:", os.getcwd())
-        st.write("Files in root directory:", os.listdir())
-        st.write("Files in data directory:", 
-                 os.listdir("data") if os.path.exists("data") else "No data folder")
-
-
-def find_pdf_file():
-    """Find the constitution PDF file in various possible locations."""
-    possible_paths = [
-        "data/constitution_of_pakistan.pdf",
-        "constitution_of_pakistan.pdf",
-        "data/pakistan_constitution.pdf",
-        "pakistan_constitution.pdf",
-        # Add more potential paths as needed
-    ]
-    
-    for path in possible_paths:
-        if os.path.exists(path):
-            st.sidebar.success(f"Found constitution file at: {path}")
-            return path
-    
-    return None
-
-
-# File uploader for constitution PDF
-def handle_pdf_upload():
-    uploaded_file = st.sidebar.file_uploader("Upload Constitution PDF", type="pdf")
-    if uploaded_file is not None:
-        # Save the uploaded file
-        os.makedirs("data", exist_ok=True)
-        with open("data/constitution_of_pakistan.pdf", "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.sidebar.success("File uploaded successfully!")
-        return "data/constitution_of_pakistan.pdf"
-    return None
-
-
 @st.cache_resource
-def build_or_load_vector_store(pdf_path):
+def build_or_load_vector_store(pdf_file=None):
     """Build a new vector store if it doesn't exist, or load the existing one using FastEmbed."""
     try:
-        from langchain_community.embeddings import FastEmbedEmbeddings
         embedding_model = FastEmbedEmbeddings()
-
-        db_file = os.path.join(PERSIST_DIRECTORY, "chroma.sqlite3")
+        db_file = os.path.join(DATA_DIR, "chroma.sqlite3")
         
-        if os.path.exists(db_file):
-            with st.spinner("Loading existing vector database..."):
-                return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
-                    embedding_function=embedding_model
-                )
-        else:
+        # If we have a PDF file uploaded or the database doesn't exist yet
+        if pdf_file is not None or not os.path.exists(db_file):
             with st.spinner("Building new vector database (this may take a few minutes)..."):
+                # If a file was uploaded, use it
+                if pdf_file is not None:
+                    # Save the uploaded file temporarily
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
+                        tmp_file.write(pdf_file.getvalue())
+                        pdf_path = tmp_file.name
+                else:
+                    # Use the default file path - first we need to check if the file exists
+                    default_pdf_path = "constitution_of_pakistan.pdf"
+                    if not os.path.exists(default_pdf_path):
+                        st.error(f"Default PDF file not found: {default_pdf_path}")
+                        st.info("Please upload a PDF of the Pakistan Constitution.")
+                        return None
+                    pdf_path = default_pdf_path
+                
+                # Load the document
                 docs = PyPDFLoader(pdf_path).load()
                 
+                # Clean the text
                 def clean_text(text):
                     return " ".join(text.split())
                 
                 cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
                 
+                # Split the documents
                 text_splitter = RecursiveCharacterTextSplitter(
                     chunk_size=2000,
                     chunk_overlap=200
                 )
                 documents = text_splitter.split_documents(cleaned_docs)
                 
-                
+                # Create the database
                 Chroma.from_documents(
                     documents=documents,
                     embedding=embedding_model,
-                    persist_directory=PERSIST_DIRECTORY
+                    persist_directory=DATA_DIR
                 )
                 
+                # Delete the temporary file if it was created
+                if pdf_file is not None:
+                    try:
+                        os.unlink(pdf_path)
+                    except:
+                        pass
                 
                 return Chroma(
-                    persist_directory=PERSIST_DIRECTORY,
+                    persist_directory=DATA_DIR,
+                    embedding_function=embedding_model
+                )
+                
+        else:
+            # Load the existing database
+            with st.spinner("Loading existing vector database..."):
+                return Chroma(
+                    persist_directory=DATA_DIR,
                     embedding_function=embedding_model
                 )
 
     except ImportError:
         st.error("FastEmbed not available. Please install with: pip install fastembed")
-        raise
+        return None
     except Exception as e:
         st.error(f"Error initializing vector store: {str(e)}")
-        raise
+        return None
 
-
-# Find or upload PDF file
-pdf_path = find_pdf_file() or handle_pdf_upload()
-
-# Initialize vector store
-try:
-    if pdf_path:
-        chroma_db = build_or_load_vector_store(pdf_path)
-        db_initialized = True
-    else:
-        st.error("Constitution PDF file not found. Please upload it using the form in the sidebar.")
-        db_initialized = False
-except Exception as e:
-    st.error(f"Error initializing vector database: {str(e)}")
-    db_initialized = False
-
+# Initialize the vector store based on the uploaded file or existing database
+chroma_db = build_or_load_vector_store(uploaded_pdf if 'uploaded_pdf' in locals() else None)
+db_initialized = chroma_db is not None
 
 def generate_response(question):
-    # Handle potential API key issues gracefully
-    if not groq_api_key:
-        return "API key not configured. Please set up your GROQ API key in the Streamlit secrets."
-    
+    if not GROQ_API_KEY:
+        return "Error: GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable."
+        
     llm = ChatGroq(
         model="llama3-70b-8192",
         temperature=0.1,
@@ -286,7 +248,6 @@ def generate_response(question):
     except Exception as e:
         return f"An error occurred: {str(e)}"
 
-
 chat_container = st.container()
 
 with chat_container:
@@ -298,7 +259,6 @@ with chat_container:
                 f"<div class='response-container'>{message['content']}</div>",
                 unsafe_allow_html=True
             )
-
 
 if db_initialized:
     user_question = st.chat_input("Ask a question about the Constitution of Pakistan...")
@@ -314,13 +274,11 @@ if db_initialized:
 
         st.session_state.history.append({"role": "assistant", "content": response})
 else:
-    st.warning("Vector database not initialized. Please check the error message above.")
+    if 'uploaded_pdf' not in locals() or uploaded_pdf is None:
+        st.warning("Please upload the Constitution of Pakistan PDF to initialize the application.")
 
-
-# Add deployment information 
 st.markdown("""
 <div class='footer'>
-    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only | 
-    <a href="https://github.com/Wasif-M/Pakistan-Constitution-Assistant" target="_blank">GitHub</a>
+    © 2025 Pakistan Constitution Assistant | Not legal advice | For educational purposes only
 </div>
 """, unsafe_allow_html=True)

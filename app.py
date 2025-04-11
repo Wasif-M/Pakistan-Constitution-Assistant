@@ -1,3 +1,6 @@
+import torch
+torch.classes.__path__ = [] 
+
 import os
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,8 +15,6 @@ from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 import tempfile
 import asyncio
-import torch
-torch.classes.__path__ = [] 
 os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
 try:

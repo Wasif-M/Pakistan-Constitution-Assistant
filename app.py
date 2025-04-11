@@ -3,14 +3,22 @@ import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.vectorstores import FAISS  # Changed from Chroma to FAISS
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
+
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 import tempfile
-
+import asyncio
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
+os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
     page_icon="🇵🇰",  
@@ -20,7 +28,7 @@ st.set_page_config(
 
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
-INDEX_PATH = os.path.join(DATA_DIR, "faiss_index") 
+INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")  
 
 
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
@@ -130,13 +138,13 @@ def build_or_load_vector_store():
                 vector_store = FAISS.load_local(
                     folder_path=INDEX_PATH,
                     embeddings=embedding_model,
-                    allow_dangerous_deserialization=True  
+                    allow_dangerous_deserialization=True  # Added this parameter
                 )
                 return vector_store
         
         
         with st.spinner("Building new vector database (this may take a few minutes)..."):
-        
+            
             pdf_path = "data/constitution_of_pakistan.pdf"
             
             if not pdf_path:
@@ -150,24 +158,28 @@ def build_or_load_vector_store():
             
             docs = PyPDFLoader(pdf_path).load()
             
-    
+            
             def clean_text(text):
                 return " ".join(text.split())
             
             cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
             
-        
+            
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=2000,
                 chunk_overlap=200
             )
             documents = text_splitter.split_documents(cleaned_docs)
+            
+        
             vector_store = FAISS.from_documents(
                 documents=documents,
                 embedding=embedding_model
             )
             
+            
             vector_store.save_local(INDEX_PATH)
+            
             
                 
             return vector_store
@@ -272,7 +284,7 @@ if db_initialized:
         with st.chat_message("assistant"):
             with st.spinner("Generating response..."):
                 response = generate_response(user_question)
-                
+            
                 st.markdown(f"<div class='response-container'>{response}</div>", unsafe_allow_html=True)
 
         st.session_state.history.append({"role": "assistant", "content": response})

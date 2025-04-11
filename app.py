@@ -30,7 +30,7 @@ DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")  
 
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
 if not GROQ_API_KEY:
     st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
 

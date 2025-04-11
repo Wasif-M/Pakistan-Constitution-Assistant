@@ -30,17 +30,9 @@ DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")  
 
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-if not GROQ_API_KEY and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
-    GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    
-
-st.write(f"API key found: {'Yes' if GROQ_API_KEY else 'No'}")
-st.write(f"Environment variables: {[k for k in os.environ.keys() if not k.startswith('_')]}")
-
+GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY"))
 if not GROQ_API_KEY:
     st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
-    st.stop() 
 
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"

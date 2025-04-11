@@ -1,35 +1,43 @@
+import torch
+torch.classes.__path__ = [] 
+
 import os
+import sys
+
+# Force disable watchdog before any imports
+os.environ["STREAMLIT_SERVER_FILEWATCH_TYPE"] = "none"
+os.environ["STREAMLIT_SERVER_FILEWATCH_POLL_INTERVAL_SECONDS"] = "999999"
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
+os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
+
+# Standard imports
+import tempfile
 import streamlit as st
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.vectorstores import FAISS  # Changed from Chroma to FAISS
+from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-
 from langchain_groq import ChatGroq
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import Document
 from langchain.schema.runnable import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-import tempfile
-import asyncio
-os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
-os.environ["STREAMLIT_DISABLE_WATCHDOG_WARNINGS"] = "true"
-try:
-    asyncio.get_running_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+
+# Skip problematic modules without importing them directly
+# We'll avoid importing torch completely unless absolutely needed
+
 st.set_page_config(
     page_title="Pakistan Constitution Assistant",
     page_icon="🇵🇰",  
     layout="wide"
 )
 
-
+# Data directory setup
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 INDEX_PATH = os.path.join(DATA_DIR, "faiss_index")  
 
+# API key handling
 GROQ_API_KEY = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
 if not GROQ_API_KEY:
     st.error("GROQ API key is missing. Please set it in your Streamlit secrets or as an environment variable.")
@@ -37,6 +45,7 @@ if not GROQ_API_KEY:
 os.environ["GROQ_API_KEY"] = GROQ_API_KEY
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
+# CSS Styling
 st.markdown("""
 <style>
     .main-header {
@@ -127,22 +136,22 @@ with st.sidebar:
 def build_or_load_vector_store():
     """Build a new vector store if it doesn't exist, or load the existing one."""
     try:
-        
+        # Initialize embedding model
         embedding_model = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
-        
+        # Check if index already exists
         if os.path.exists(INDEX_PATH):
             with st.spinner("Loading existing vector database..."):
                 vector_store = FAISS.load_local(
                     folder_path=INDEX_PATH,
                     embeddings=embedding_model,
-                    allow_dangerous_deserialization=True  # Added this parameter
+                    allow_dangerous_deserialization=True
                 )
                 return vector_store
         
-        
+        # Build new vector store
         with st.spinner("Building new vector database (this may take a few minutes)..."):
-            
+            # Define PDF path
             pdf_path = "data/constitution_of_pakistan.pdf"
             
             if not pdf_path:
@@ -153,33 +162,31 @@ def build_or_load_vector_store():
                 st.error(f"PDF file not found at path: {pdf_path}")
                 return None
             
-            
+            # Load PDF
             docs = PyPDFLoader(pdf_path).load()
             
-            
+            # Clean text
             def clean_text(text):
                 return " ".join(text.split())
             
             cleaned_docs = [Document(page_content=clean_text(doc.page_content)) for doc in docs]
             
-            
+            # Split documents
             text_splitter = RecursiveCharacterTextSplitter(
                 chunk_size=2000,
                 chunk_overlap=200
             )
             documents = text_splitter.split_documents(cleaned_docs)
             
-        
+            # Create vector store
             vector_store = FAISS.from_documents(
                 documents=documents,
                 embedding=embedding_model
             )
             
-            
+            # Save vector store
             vector_store.save_local(INDEX_PATH)
             
-            
-                
             return vector_store
 
     except ImportError as e:

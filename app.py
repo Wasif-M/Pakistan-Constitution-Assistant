@@ -17,7 +17,7 @@ st.set_page_config(
     layout="wide"
 )
 
-\
+
 DATA_DIR = os.path.join(tempfile.gettempdir(), "pakistan_constitution_db")
 os.makedirs(DATA_DIR, exist_ok=True)
 INDEX_PATH = os.path.join(DATA_DIR, "faiss_index") 

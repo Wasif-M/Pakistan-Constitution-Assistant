@@ -239,7 +239,7 @@ def generate_response(question):
     retriever = vector_db.as_retriever(
         search_type="similarity", 
         search_kwargs={
-            "k": 7,  
+            "k": 8,  
         }
     )
     
